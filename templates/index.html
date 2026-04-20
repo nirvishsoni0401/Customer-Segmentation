@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SegmentIQ — Customer Segmentation</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-brand">Segment<span>IQ</span></div>
+  <span class="nav-pill">K-Means · 5 clusters</span>
+</nav>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-tag">Mall Customers Dataset</div>
+  <h1>Customer<br/><span class="accent">Segmentation</span><br/>Dashboard</h1>
+  <p class="hero-sub">K-Means clustering on Annual Income vs. Spending Score — 5 distinct customer personas identified from mall customers.</p>
+</div>
+
+<!-- STAT ROW -->
+<div class="stat-row">
+  <div class="stat"><div class="stat-val">200</div><div class="stat-label">Total Customers</div></div>
+  <div class="stat"><div class="stat-val">5</div><div class="stat-label">Clusters Found</div></div>
+  <div class="stat"><div class="stat-val">0.554</div><div class="stat-label">Silhouette Score</div></div>
+  <div class="stat"><div class="stat-val">0.443</div><div class="stat-label">Davies-Bouldin</div></div>
+  <div class="stat"><div class="stat-val">k-means++</div><div class="stat-label">Initialization</div></div>
+</div>
+
+<!-- CHARTS -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-num">01</span>
+    <h2>Cluster Visualization</h2>
+  </div>
+  <div class="two-col">
+    <div class="card">
+      <div class="legend" id="scatterLegend"></div>
+      <div style="position:relative;height:320px;">
+        <canvas id="scatterChart" role="img" aria-label="Scatter plot of customer clusters">Customer clusters by income and spending.</canvas>
+      </div>
+    </div>
+    <div class="card">
+      <div class="chart-label">Customers per Cluster</div>
+      <div style="position:relative;height:320px;">
+        <canvas id="barChart" role="img" aria-label="Bar chart of customers per cluster">Bar chart showing cluster sizes.</canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ELBOW -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-num">02</span>
+    <h2>Elbow Method &amp; Model Metrics</h2>
+  </div>
+  <div class="metrics-row">
+    <div class="metric-card"><div class="val">44,448</div><div class="lbl">WCSS (k=5)</div></div>
+    <div class="metric-card"><div class="val">0.554</div><div class="lbl">Silhouette</div></div>
+    <div class="metric-card"><div class="val">0.443</div><div class="lbl">Davies-Bouldin</div></div>
+  </div>
+  <div class="card">
+    <div style="position:relative;height:260px;">
+      <canvas id="elbowChart" role="img" aria-label="Elbow method chart">WCSS vs number of clusters.</canvas>
+    </div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- PREDICTOR -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-num">03</span>
+    <h2>Predict Customer Segment</h2>
+  </div>
+  <div class="card">
+    <div class="predict-grid">
+      <div class="field">
+        <label>Annual Income (k$)</label>
+        <div class="range-row">
+          <input type="range" id="incomeSlider" min="15" max="137" value="70" oninput="updateSliders()"/>
+          <span class="range-val" id="incomeVal">70</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Spending Score (1–100)</label>
+        <div class="range-row">
+          <input type="range" id="spendSlider" min="1" max="99" value="50" oninput="updateSliders()"/>
+          <span class="range-val" id="spendVal">50</span>
+        </div>
+      </div>
+    </div>
+    <button class="predict-btn" onclick="predict()">Classify Customer</button>
+    <div id="loadingMsg" style="display:none;margin-top:1rem;font-size:13px;color:var(--muted);">Classifying...</div>
+    <div class="result-box" id="resultBox">
+      <div class="result-dot" id="resultDot"></div>
+      <div class="result-text">
+        <strong id="resultCluster"></strong>
+        <span id="resultDesc"></span>
+        <em id="resultStrategy"></em>
+      </div>
+    </div>
+    <div id="errorMsg" class="error-msg"></div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- SEGMENTS -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-num">04</span>
+    <h2>Segment Profiles</h2>
+  </div>
+  <div class="segment-grid" id="segmentGrid"></div>
+</div>
+
+<footer>
+  <span>Customer Segmentation · K-Means Clustering · Mall Customers Dataset</span>
+  <span>sklearn · Python · Flask · k=5</span>
+</footer>
+
+<script>
+  const CLUSTER_COLORS = ['#60a5fa','#fbbf24','#f87171','#e879f9','#34d399'];
+  const CLUSTER_NAMES  = ['Frugal Low-Income','Premium Spenders','Cautious High-Earners','Impulsive Shoppers','Balanced Mainstream'];
+  const CLUSTER_DESC   = [
+    'Low income, low spending. Discount-driven shoppers.',
+    'High income, high spending. VIP and luxury targets.',
+    'High income, low spending. Conservative, quality-focused.',
+    'Low income, high spending. Impulse buyers, BNPL ready.',
+    'Mid income, mid spending. Broad loyalty audience.'
+  ];
+
+  // Sample scatter points per cluster (approximated from real dataset)
+  const SCATTER_POINTS = [
+    [[16,6],[17,5],[18,7],[19,4],[15,10],[17,8],[20,5],[16,3],[18,13],[21,7],[17,12],[19,6],[15,4],[20,9],[18,14],[16,6],[17,7],[22,6]],
+    [[71,78],[72,80],[74,76],[75,82],[73,78],[76,72],[78,80],[80,74],[77,86],[82,76],[73,82],[75,70],[77,78],[79,86],[74,80],[76,74]],
+    [[55,30],[60,28],[63,35],[58,32],[65,25],[70,28],[50,35],[62,22],[67,30],[75,28],[58,42],[63,18],[68,36],[72,22],[76,28],[61,38]],
+    [[16,78],[17,80],[19,72],[20,76],[15,82],[18,70],[17,86],[19,74],[20,80],[16,68],[18,84],[20,72],[17,78],[15,76],[19,86],[16,74]],
+    [[41,50],[42,55],[44,52],[46,50],[43,58],[45,46],[48,50],[41,62],[44,48],[47,55],[43,42],[46,60],[44,54],[42,44],[45,50],[48,46]],
+  ];
+  const CENTROIDS = [[26.5,19.4],[86.8,80.3],[53.2,20.3],[26.4,83.0],[54.9,50.7]];
+
+  // ── SCATTER ──
+  const scatterDatasets = SCATTER_POINTS.map((pts, i) => ({
+    label: `Cluster ${i+1}`,
+    data: pts.map(p => ({x:p[0],y:p[1]})),
+    backgroundColor: CLUSTER_COLORS[i] + 'cc',
+    pointRadius: 5, pointHoverRadius: 7, showLine: false
+  }));
+  scatterDatasets.push({
+    label: 'Centroids',
+    data: CENTROIDS.map(p => ({x:p[0],y:p[1]})),
+    backgroundColor: '#ffffffee',
+    pointStyle: 'crossRot', pointRadius: 9, pointBorderWidth: 2,
+    pointBorderColor: '#fff', showLine: false
+  });
+
+  new Chart(document.getElementById('scatterChart'), {
+    type: 'scatter', data: { datasets: scatterDatasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { title:{display:true,text:'Annual Income (k$)',color:'#7a7f92',font:{size:11}}, ticks:{color:'#7a7f92'}, grid:{color:'rgba(255,255,255,0.05)'}, min:10, max:145 },
+        y: { title:{display:true,text:'Spending Score',color:'#7a7f92',font:{size:11}}, ticks:{color:'#7a7f92'}, grid:{color:'rgba(255,255,255,0.05)'}, min:0, max:100 }
+      }
+    }
+  });
+
+  // Legend
+  const legendEl = document.getElementById('scatterLegend');
+  CLUSTER_COLORS.forEach((c, i) => {
+    legendEl.innerHTML += `<div class="legend-item"><span class="legend-dot" style="background:${c}"></span>Cluster ${i+1}</div>`;
+  });
+  legendEl.innerHTML += `<div class="legend-item"><span class="legend-dot" style="background:#fff;border:2px solid #888;border-radius:2px;width:12px;height:12px;"></span>Centroid</div>`;
+
+  // ── BAR ──
+  new Chart(document.getElementById('barChart'), {
+    type: 'bar',
+    data: {
+      labels: ['Cluster 1','Cluster 2','Cluster 3','Cluster 4','Cluster 5'],
+      datasets: [{ label:'Customers', data:[35,38,40,37,50],
+        backgroundColor: CLUSTER_COLORS.map(c => c+'cc'), borderRadius:6, borderSkipped:false }]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false} },
+      scales: {
+        x:{ticks:{color:'#7a7f92'},grid:{display:false}},
+        y:{ticks:{color:'#7a7f92'},grid:{color:'rgba(255,255,255,0.05)'},beginAtZero:true}
+      }
+    }
+  });
+
+  // ── ELBOW ──
+  new Chart(document.getElementById('elbowChart'), {
+    type: 'line',
+    data: {
+      labels: ['1','2','3','4','5','6','7','8','9','10'],
+      datasets: [{
+        label:'WCSS',
+        data:[269981,181363,106348,73679,44448,37643,30259,25010,21005,18124],
+        borderColor:'#a78bfa', backgroundColor:'rgba(167,139,250,0.08)',
+        borderWidth:2, pointRadius:5, pointBackgroundColor:'#a78bfa',
+        pointBorderColor:'#0d0f14', pointBorderWidth:2, fill:true, tension:0.4
+      }]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false} },
+      scales: {
+        x:{ title:{display:true,text:'Number of Clusters (k)',color:'#7a7f92',font:{size:11}}, ticks:{color:'#7a7f92'}, grid:{color:'rgba(255,255,255,0.05)'} },
+        y:{ title:{display:true,text:'WCSS',color:'#7a7f92',font:{size:11}}, ticks:{color:'#7a7f92'}, grid:{color:'rgba(255,255,255,0.05)'} }
+      }
+    }
+  });
+
+  // ── SEGMENT CARDS ──
+  const segDescriptions = [
+    'Low income, low spending. Budget-constrained shoppers; respond well to discounts and value bundles.',
+    'High income, high spending. Ideal for luxury upsells, VIP programs, and early access campaigns.',
+    'High income, low spending. Financially conservative; target with premium savings products.',
+    'Low income, high spending. Enthusiastic buyers — credit and BNPL options work well here.',
+    'Mid income, mid spending. The average customer; broad loyalty programs suit this segment.'
+  ];
+  const grid = document.getElementById('segmentGrid');
+  CLUSTER_COLORS.forEach((c, i) => {
+    grid.innerHTML += `
+      <div class="seg-card" style="border-top-color:${c}">
+        <span class="seg-badge" style="background:${c}">&nbsp;Cluster ${i+1}&nbsp;</span>
+        <h3>${CLUSTER_NAMES[i]}</h3>
+        <p>${segDescriptions[i]}</p>
+      </div>`;
+  });
+
+  // ── PREDICTOR ──
+  function updateSliders() {
+    document.getElementById('incomeVal').textContent = document.getElementById('incomeSlider').value;
+    document.getElementById('spendVal').textContent  = document.getElementById('spendSlider').value;
+  }
+
+  async function predict() {
+    const income   = parseInt(document.getElementById('incomeSlider').value);
+    const spending = parseInt(document.getElementById('spendSlider').value);
+    const resultBox = document.getElementById('resultBox');
+    const errBox    = document.getElementById('errorMsg');
+    const loading   = document.getElementById('loadingMsg');
+
+    resultBox.classList.remove('show');
+    errBox.textContent = '';
+    loading.style.display = 'block';
+
+    try {
+      const res  = await fetch('/predict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ income, spending })
+      });
+      const data = await res.json();
+      loading.style.display = 'none';
+
+      if (!res.ok) {
+        errBox.textContent = data.error || 'Prediction failed.';
+        return;
+      }
+
+      document.getElementById('resultDot').style.background  = data.color;
+      document.getElementById('resultCluster').textContent   = `Cluster ${data.cluster_label} — ${data.name}`;
+      document.getElementById('resultDesc').textContent      = data.description;
+      document.getElementById('resultStrategy').textContent  = '→ ' + data.strategy;
+      resultBox.classList.add('show');
+    } catch (e) {
+      loading.style.display = 'none';
+      errBox.textContent = 'Network error — make sure the Flask server is running.';
+    }
+  }
+</script>
+</body>
+</html>
